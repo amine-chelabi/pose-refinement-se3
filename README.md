@@ -1,30 +1,50 @@
-# Raffinement de pose caméra (PnL/PnP, SE(3))
+# Pose Refinement SE(3) — PnL/PnP Optimization
 
-Code extrait de mon stage R&D chez Imajing (vision par ordinateur, Toulouse).
-Sert à corriger la pose GPS/IMU d'un smartphone en la recalant sur des
-correspondances 3D-2D (points et segments) issues d'une caméra de référence.
+Camera pose refinement using point-to-point (PnP) and point-to-line (PnL)
+geometric constraints, optimized via nonlinear least squares on SE(3).
 
-Seule la brique d'optimisation est ici — matching, triangulation et
-infrastructure de production restent privés.
+Extracted and generalized from an R&D internship project at [Imajing](https://www.imajing.io)
+(Toulouse) — a pipeline that corrects smartphone GPS/IMU pose by aligning
+observed 3D structure (road markings, edges) against a reference camera.
+Only the optimization core is published here; the full pipeline (feature
+matching, triangulation, production infrastructure) is proprietary.
 
-## Fichiers
+## Problem
 
-- `se3_geometry.py` : exponentielle de Lie so(3)->SO(3), reprojection d'un segment 3D en droite 2D
-- `pose_optimization.py` : résidus PnL (point-to-ligne) et PnP (point-to-point), passés à `scipy.optimize.least_squares`
-- `demo_synthetic.py` : test sur scène synthétique avec vérité terrain connue
+A smartphone's GPS/IMU pose is noisy — typically off by ~1 meter and a few
+degrees. Given a set of known 3D points/lines and their observed 2D
+projections in the smartphone image, this module solves for the small pose
+correction that best explains the observations.
 
-## Pourquoi PnL en plus de PnP
+## Method
 
-Pour des structures type marquage au sol, l'appariement point-à-point exact
-est ambigu (le point glisse le long de la ligne). Le résidu PnL pénalise la
-distance à la droite reprojetée plutôt qu'à un point précis — plus robuste
-sur ce type de structure.
+The pose correction is parameterized as a local SE(3) increment:
 
-La pose est paramétrée localement : `R = R0 @ Exp(omega)`, `t = t0 + t_delta`,
-avec des bornes serrées (rotation ≤ 2.5°, translation ≤ 15 m), cohérent avec
-l'hypothèse de warm start autour d'une pose GPS déjà à peu près correcte.
+```
+R = R0 @ Exp(omega)      t = t0 + t_delta
+```
 
-## Utilisation
+applied around an initial pose (R0, t0), with `Exp` the so(3) exponential
+map (Rodrigues' formula). Bounds are set tight (rotation ≤ 2.5°,
+translation ≤ 15 m), consistent with a warm-start assumption — this refines
+a locally correct pose, it does not solve pose estimation from scratch.
+
+Two residual types feed `scipy.optimize.least_squares`:
+
+- **PnP** — reprojection error of a 3D point against its 2D observation.
+- **PnL** — distance from a reprojected 3D line to its observed segment
+  endpoints. Used for line-like structure (lane markings, edges) where
+  point-to-point correspondence is ambiguous along the line direction.
+
+## Files
+
+| File | Content |
+|---|---|
+| `se3_geometry.py` | so(3) exponential map, SE(3) increment, 3D line → 2D line reprojection |
+| `pose_optimization.py` | PnP/PnL residuals, combined cost function |
+| `demo_synthetic.py` | Validation on a synthetic scene with known ground truth |
+
+## Usage
 
 ```bash
 pip install numpy scipy
@@ -36,8 +56,21 @@ avant : rot=1.63°  trans=0.62m
 après : rot=0.1217°  trans=0.0074m  (cost=2.0219, nfev=14, success=True)
 ```
 
-## Référence
+## Limitations
 
-GlueStick (matching points+lignes, utilisé en amont dans le pipeline
-original) : Pautrat et al., *GlueStick: Robust Image Matching by Sticking
-Points and Lines Together*, ICCV 2023.
+- Feature matching and outlier rejection (RANSAC) are not included —
+  the original pipeline uses [GlueStick](https://arxiv.org/abs/2304.02008)
+  (Pautrat et al., ICCV 2023) for joint point/line matching.
+- Validated on synthetic data with clean correspondences; real-world
+  performance depends on matching quality and inlier ratio.
+- Assumes a reasonably accurate initial pose (warm start), not a
+  general-purpose pose estimator.
+
+## Author
+
+Amine Chelabi — M2 Signal, Image et Apprentissage Automatique, Université
+Toulouse III. [LinkedIn](https://www.linkedin.com/in/amine-chelabi-13726a2b7)
+
+## License
+
+MIT
